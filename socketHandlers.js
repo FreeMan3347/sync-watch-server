@@ -9,6 +9,7 @@ const {
   findRoomBySocket,
   getPeerId,
   updatePlaybackState,
+  updatePlaybackTime,
   removeSocket,
 } = require('./rooms');
 
@@ -84,6 +85,30 @@ function registerSocketHandlers(io) {
       });
     });
 
+    // --- Drift-correction heartbeats ---------------------------------------
+    //
+    // Sent periodically by a client while playing (not on every event —
+    // just a steady "here's roughly where I am"). Relayed to the peer the
+    // same way play/pause/seek are, so the peer can nudge itself back in
+    // sync if it's drifted more than a small tolerance. Unlike play/pause/
+    // seek, this does NOT change the room's known play/pause state — only
+    // the currentTime — since a heartbeat isn't a state transition.
+
+    socket.on('heartbeat', (payload = {}) => {
+      const room = findRoomBySocket(socket.id);
+      if (!room) return;
+
+      updatePlaybackTime(room, payload.currentTime);
+
+      const peerId = getPeerId(room, socket.id);
+      if (!peerId) return;
+
+      io.to(peerId).emit('heartbeat', {
+        currentTime: payload.currentTime,
+        serverTimestamp: Date.now(),
+      });
+    });
+
     // --- Disconnect handling ----------------------------------------------
 
     socket.on('disconnect', (reason) => {
@@ -101,5 +126,7 @@ function registerSocketHandlers(io) {
     });
   });
 }
+
+module.exports = { registerSocketHandlers };
 
 module.exports = { registerSocketHandlers };
