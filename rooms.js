@@ -92,6 +92,17 @@ function updatePlaybackState(room, type, currentTime) {
 }
 
 /**
+ * Heartbeat updates only refresh the known currentTime — they don't
+ * represent a play/pause state change, just "here's roughly where I am
+ * right now." Keeping this separate from updatePlaybackState() means a
+ * heartbeat can never accidentally overwrite the room's play/pause type.
+ */
+function updatePlaybackTime(room, currentTime) {
+  room.playbackState.currentTime = currentTime;
+  room.playbackState.updatedAt = Date.now();
+}
+
+/**
  * Remove a socket from whatever room it's in. Deletes the room entirely
  * if it's now empty. Returns the room it was removed from (if any) so
  * the caller can notify remaining members.
@@ -121,5 +132,7 @@ module.exports = {
   findRoomBySocket,
   getPeerId,
   updatePlaybackState,
+  updatePlaybackTime,
   removeSocket,
 };
+
