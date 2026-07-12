@@ -2,12 +2,17 @@
 //
 // All Socket.io event wiring lives here. index.js just calls
 // registerSocketHandlers(io) once at startup.
+//
+// Rooms now support up to MAX_MEMBERS_PER_ROOM people (see rooms.js),
+// not just two. Instead of manually tracking "the other person's socket
+// id" and unicasting to them, we use Socket.io's own room broadcast —
+// socket.to(code).emit(...) sends to everyone in that room except the
+// sender, automatically, regardless of how many people are in it.
 
 const {
   createRoom,
   joinRoom,
   findRoomBySocket,
-  getPeerId,
   updatePlaybackState,
   updatePlaybackTime,
   removeSocket,
@@ -28,7 +33,7 @@ function registerSocketHandlers(io) {
       console.log(`[create-room] ${socket.id} created room ${room.code}`);
 
       if (typeof ack === 'function') {
-        ack({ ok: true, code: room.code });
+        ack({ ok: true, code: room.code, memberCount: room.members.size });
       }
     });
 
@@ -47,21 +52,26 @@ function registerSocketHandlers(io) {
       }
 
       socket.join(code);
-      console.log(`[join-room] ${socket.id} joined room ${code}`);
+      console.log(`[join-room] ${socket.id} joined room ${code} (${result.room.members.size}/${result.room.members.size} shown after join)`);
 
       const room = result.room;
-      const peerId = getPeerId(room, socket.id);
 
       // Tell the joining client the room's current playback state so it
       // can resync immediately instead of waiting for the next event.
       if (typeof ack === 'function') {
-        ack({ ok: true, code: room.code, playbackState: room.playbackState });
+        ack({
+          ok: true,
+          code: room.code,
+          playbackState: room.playbackState,
+          memberCount: room.members.size,
+        });
       }
 
-      // Let the existing member know someone joined.
-      if (peerId) {
-        io.to(peerId).emit('peer-joined', { socketId: socket.id });
-      }
+      // Let everyone already in the room know someone new joined.
+      socket.to(code).emit('peer-joined', {
+        socketId: socket.id,
+        memberCount: room.members.size,
+      });
     });
 
     // --- Playback event relaying ------------------------------------------
@@ -73,12 +83,9 @@ function registerSocketHandlers(io) {
 
         updatePlaybackState(room, eventType, payload.currentTime);
 
-        const peerId = getPeerId(room, socket.id);
-        if (!peerId) return; // no partner yet, nothing to relay to
-
-        io.to(peerId).emit(eventType, {
+        socket.to(room.code).emit(eventType, {
           currentTime: payload.currentTime,
-          // Server-authoritative timestamp, so the receiver can measure
+          // Server-authoritative timestamp, so each receiver can measure
           // delivery latency and compensate (e.g. seek forward on play).
           serverTimestamp: Date.now(),
         });
@@ -88,11 +95,11 @@ function registerSocketHandlers(io) {
     // --- Drift-correction heartbeats ---------------------------------------
     //
     // Sent periodically by a client while playing (not on every event —
-    // just a steady "here's roughly where I am"). Relayed to the peer the
-    // same way play/pause/seek are, so the peer can nudge itself back in
-    // sync if it's drifted more than a small tolerance. Unlike play/pause/
-    // seek, this does NOT change the room's known play/pause state — only
-    // the currentTime — since a heartbeat isn't a state transition.
+    // just a steady "here's roughly where I am"). Broadcast to the rest
+    // of the room the same way play/pause/seek are, so everyone else can
+    // nudge themselves back in sync if they've drifted more than a small
+    // tolerance. Unlike play/pause/seek, this does NOT change the room's
+    // known play/pause state — only the currentTime.
 
     socket.on('heartbeat', (payload = {}) => {
       const room = findRoomBySocket(socket.id);
@@ -100,12 +107,22 @@ function registerSocketHandlers(io) {
 
       updatePlaybackTime(room, payload.currentTime);
 
-      const peerId = getPeerId(room, socket.id);
-      if (!peerId) return;
-
-      io.to(peerId).emit('heartbeat', {
+      socket.to(room.code).emit('heartbeat', {
         currentTime: payload.currentTime,
         serverTimestamp: Date.now(),
+      });
+    });
+
+    // --- Chat message relaying ----------------------------------------------
+
+    socket.on('chat-message', (payload = {}) => {
+      const room = findRoomBySocket(socket.id);
+      if (!room) return;
+
+      socket.to(room.code).emit('chat-message', {
+        text: payload.text,
+        senderId: socket.id,
+        timestamp: Date.now(),
       });
     });
 
@@ -114,19 +131,17 @@ function registerSocketHandlers(io) {
     socket.on('disconnect', (reason) => {
       console.log(`[disconnect] ${socket.id} (${reason})`);
 
-      // removeSocket() takes the disconnecting socket OUT of the room
-      // first, so anyone left in room.members afterward is the peer.
       const room = removeSocket(socket.id);
       if (!room) return;
 
-      const remainingPeerId = [...room.members][0];
-      if (remainingPeerId) {
-        io.to(remainingPeerId).emit('peer-disconnected', { socketId: socket.id });
-      }
+      // Room broadcast (not socket.to, since the disconnecting socket is
+      // already gone and can't receive this anyway) to whoever remains.
+      io.to(room.code).emit('peer-disconnected', {
+        socketId: socket.id,
+        memberCount: room.members.size,
+      });
     });
   });
 }
-
-module.exports = { registerSocketHandlers };
 
 module.exports = { registerSocketHandlers };
