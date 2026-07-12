@@ -7,7 +7,7 @@
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid confusion
 const CODE_LENGTH = 5;
-const MAX_MEMBERS_PER_ROOM = 2;
+const MAX_MEMBERS_PER_ROOM = 10;
 
 // code -> { code, members: Set<socketId>, hostId, createdAt, playbackState }
 const rooms = new Map();
@@ -135,4 +135,3 @@ module.exports = {
   updatePlaybackTime,
   removeSocket,
 };
-
