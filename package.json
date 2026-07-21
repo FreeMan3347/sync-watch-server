@@ -1,0 +1,14 @@
+{
+  "name": "sync-watch-server",
+  "version": "1.0.0",
+  "description": "Lightweight Socket.io backend for synchronized local-video watching (room creation, joining, and play/pause/seek relaying).",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
